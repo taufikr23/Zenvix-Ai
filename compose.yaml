@@ -1,0 +1,96 @@
+name: documind-ai
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-documind}
+      POSTGRES_USER: ${DB_USERNAME:-documind}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Jalankan scripts/setup-env.ps1 untuk membuat .env}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-documind}
+      DB_USERNAME: ${DB_USERNAME:-documind}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD wajib diisi}
+      JWT_SECRET: ${JWT_SECRET:?Jalankan scripts/setup-env.ps1 untuk membuat JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-documind-ai}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-documind-api}
+      JWT_ACCESS_TOKEN_SECONDS: ${JWT_ACCESS_TOKEN_SECONDS:-900}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CHAT_ENABLED: ${CHAT_ENABLED:-false}
+      GEMINI_CHAT_MODEL: ${GEMINI_CHAT_MODEL:-gemini-3.5-flash-lite}
+      CHAT_TIMEOUT_MS: ${CHAT_TIMEOUT_MS:-90000}
+      CHAT_MAX_OUTPUT_TOKENS: ${CHAT_MAX_OUTPUT_TOKENS:-1024}
+      CHAT_TOP_K: ${CHAT_TOP_K:-5}
+      CHAT_MIN_SIMILARITY: ${CHAT_MIN_SIMILARITY:-0.45}
+      CHAT_MAX_CONTEXT_CHARACTERS: ${CHAT_MAX_CONTEXT_CHARACTERS:-6000}
+      CHAT_MAX_TURNS: ${CHAT_MAX_TURNS:-50}
+      CHAT_MAX_CONVERSATIONS: ${CHAT_MAX_CONVERSATIONS:-100}
+      CHAT_DAILY_REQUESTS: ${CHAT_DAILY_REQUESTS:-500}
+      CHAT_USER_DAILY_REQUESTS: ${CHAT_USER_DAILY_REQUESTS:-50}
+      CHAT_DAILY_CHARACTERS: ${CHAT_DAILY_CHARACTERS:-10000000}
+      CHAT_USER_DAILY_CHARACTERS: ${CHAT_USER_DAILY_CHARACTERS:-2000000}
+      EMBEDDING_ENABLED: ${EMBEDDING_ENABLED:-false}
+      EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-20000}
+      EMBEDDING_POLL_DELAY_MS: ${EMBEDDING_POLL_DELAY_MS:-1000}
+      EMBEDDING_DAILY_CHARACTERS: ${EMBEDDING_DAILY_CHARACTERS:-200000}
+      EMBEDDING_USER_DAILY_CHARACTERS: ${EMBEDDING_USER_DAILY_CHARACTERS:-50000}
+      PROCESSING_ENABLED: ${PROCESSING_ENABLED:-true}
+      PROCESSING_POLL_DELAY_MS: ${PROCESSING_POLL_DELAY_MS:-1000}
+      CHUNK_SIZE: ${CHUNK_SIZE:-1000}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-150}
+      MAX_EXTRACTED_CHARACTERS: ${MAX_EXTRACTED_CHARACTERS:-2000000}
+      MAX_CHUNKS: ${MAX_CHUNKS:-3000}
+      PROCESSING_TIMEOUT_SECONDS: ${PROCESSING_TIMEOUT_SECONDS:-60}
+      STORAGE_ROOT: /app/data/documents
+      MAX_DOCUMENTS_PER_USER: ${MAX_DOCUMENTS_PER_USER:-50}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-10MB}
+      MAX_REQUEST_SIZE: ${MAX_REQUEST_SIZE:-11MB}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - documents_data:/app/data/documents
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_MAX_UPLOAD_MB: ${FRONTEND_MAX_UPLOAD_MB:-10}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  documents_data:
+  postgres_data:

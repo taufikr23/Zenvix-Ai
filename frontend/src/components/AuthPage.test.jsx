@@ -1,0 +1,42 @@
+import React from 'react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { AuthPage } from './AuthPage';
+import { request } from '../lib/api';
+import { useSession } from '../lib/session';
+vi.mock('../lib/api', () => ({ request: vi.fn() }));
+vi.mock('../lib/session', () => ({ useSession: vi.fn() }));
+const login = vi.fn();
+beforeEach(() => { request.mockReset(); login.mockReset(); useSession.mockReturnValue({ login, notice: '' }); });
+afterEach(cleanup);
+it('registers first and then signs in using the server token', async () => {
+  const result = { accessToken: 'test', expiresIn: 900, user: { id: 'u1' } };
+  request.mockResolvedValueOnce({ id: 'u1' }).mockResolvedValueOnce(result);
+  render(<AuthPage/>); const user = userEvent.setup();
+  await user.click(screen.getByText('Daftar sekarang'));
+  await user.type(screen.getByLabelText('Alamat email'), 'belajar@example.test');
+  await user.type(screen.getByLabelText('Password', { exact: true }), 'Belajar-2026!');
+  await user.click(screen.getByRole('button', { name: 'Buat akun', exact: true }));
+  await waitFor(() => expect(login).toHaveBeenCalledWith(result));
+  expect(request.mock.calls.map(call => call[0])).toEqual(['/auth/register', '/auth/login']);
+  expect(request.mock.calls[0][1].body).toEqual({ email: 'belajar@example.test', password: 'Belajar-2026!' });
+  expect(request.mock.calls[0][1].publicRequest).toBe(true);
+});
+it('keeps the login form open when credentials are rejected', async () => {
+  request.mockRejectedValue(new Error('Email atau password salah.'));
+  render(<AuthPage/>); const user = userEvent.setup();
+  await user.type(screen.getByLabelText('Alamat email'), 'belajar@example.test');
+  await user.type(screen.getByLabelText('Password', { exact: true }), 'wrong-password');
+  await user.click(screen.getByRole('button', { name: 'Masuk ke ruang kerja' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Email atau password salah.');
+  expect(login).not.toHaveBeenCalled();
+});
+it('rejects multibyte passwords beyond the backend byte limit', async () => {
+  render(<AuthPage/>);
+  fireEvent.change(screen.getByLabelText('Alamat email'), { target: { value: 'belajar@example.test' } });
+  fireEvent.change(screen.getByLabelText('Password', { exact: true }), { target: { value: 'é'.repeat(40) } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Masuk ke ruang kerja' }).closest('form'));
+  expect((await screen.findByRole('alert')).textContent).toContain('72 byte');
+  expect(request).not.toHaveBeenCalled();
+});
